@@ -1,0 +1,79 @@
+import numpy as np
+
+# Objective Function: Simulate total vehicle waiting time based on green splits
+# Lower waiting time means a better fitness score.
+def traffic_delay_cost(green_splits):
+    """
+    Calculates total vehicle delay/waiting time for 4 intersection phases.
+    Inputs:
+        green_splits (array): Duration of green lights for 4 phases (seconds)
+    Constraint check: Total cycle time is fixed (e.g., 120 seconds).
+    """
+    # Penalty if sum of green splits deviates from available effective green time (e.g., 100s, leaving 20s for yellow/all-red)
+    cycle_penalty = max(0, abs(np.sum(green_splits) - 100.0)) * 50 
+    
+    # Simulated vehicle arrival rates (vehicles per minute) for 4 directions
+    arrival_rates = np.array([5.2, 3.8, 6.1, 4.0]) 
+    
+    # Waiting time formula approximation: Delay increases if green time is too short for arrivals
+    # or if disproportionately allocated.
+    waiting_times = (arrival_rates * 60.0) / (green_splits + 1.0)
+    total_delay = np.sum(waiting_times) + cycle_penalty
+    
+    return total_delay
+
+# Particle Swarm Optimization Parameters
+num_particles = 30
+max_iter = 50
+dimensions = 4          # Four traffic phases/directions
+min_bound = 10.0        # Min green time per phase (seconds)
+max_bound = 50.0        # Max green time per phase (seconds)
+
+w = 0.7   # Inertia weight
+c1 = 1.5  # Cognitive coefficient (personal best)
+c2 = 1.5  # Social coefficient (global best)
+
+# Initialize particles position and velocity uniformly at random
+position = np.random.uniform(min_bound, max_bound, (num_particles, dimensions))
+velocity = np.random.uniform(-1.0, 1.0, (num_particles, dimensions))
+
+# Initialize personal bests and global best
+p_best_position = position.copy()
+p_best_cost = np.array([traffic_delay_cost(p) for p in position])
+
+g_best_index = np.argmin(p_best_cost)
+g_best_position = p_best_position[g_best_index].copy()
+g_best_cost = p_best_cost[g_best_index]
+
+# Main PSO Loop
+for iteration in range(max_iter):
+    for i in range(num_particles):
+        r1 = np.random.rand(dimensions)
+        r2 = np.random.rand(dimensions)
+        
+        # Update velocity
+        velocity[i] = (w * velocity[i] + 
+                       c1 * r1 * (p_best_position[i] - position[i]) + 
+                       c2 * r2 * (g_best_position - position[i]))
+        
+        # Update position with boundary constraints
+        position[i] = position[i] + velocity[i]
+        position[i] = np.clip(position[i], min_bound, max_bound)
+        
+        # Evaluate fitness
+        current_cost = traffic_delay_cost(position[i])
+        
+        # Update personal best
+        if current_cost < p_best_cost[i]:
+            p_best_cost[i] = current_cost
+            p_best_position[i] = position[i].copy()
+            
+            # Update global best
+            if current_cost < g_best_cost:
+                g_best_cost = current_cost
+                g_best_position = position[i].copy()
+
+# Output Optimized Results
+print("Optimization Complete!")
+print(f"Optimal Green Splits for Phases 1-4 (seconds): {np.round(g_best_position, 2)}")
+print(f"Minimum Estimated Traffic Delay Cost: {round(g_best_cost, 2)}")
