@@ -1,0 +1,173 @@
+import random
+
+# ----------------------------------------------------
+# 1. NETWORK TOPOLOGY SETUP
+# ----------------------------------------------------
+# Representing the network graph where keys are nodes and 
+# values are dictionaries of neighbors and their link latency/cost.
+NETWORK_GRAPH = {
+    0: {1: 4, 2: 2},
+    1: {0: 4, 2: 1, 3: 5},
+    2: {0: 2, 1: 1, 3: 8, 4: 10},
+    3: {1: 5, 2: 8, 4: 2, 5: 6},
+    4: {2: 10, 3: 2, 5: 3},
+    5: {3: 6, 4: 3}
+}
+
+SOURCE_NODE = 0
+DESTINATION_NODE = 5
+
+# ----------------------------------------------------
+# 2. PATH HELPER & REPAIR FUNCTIONS
+# ----------------------------------------------------
+def generate_random_path(graph, start, end):
+    """Generates a valid path without loops from start to end."""
+    path = [start]
+    current = start
+    visited = {start}
+    
+    while current != end:
+        neighbors = [n for n in graph[current].keys() if n not in visited]
+        if not neighbors:
+            return None # Dead end
+        current = random.choice(neighbors)
+        path.append(current)
+        visited.add(current)
+    return path
+
+def clean_loops(path):
+    """Removes loops from a path if crossover/mutation created them."""
+    cleaned = []
+    for node in path:
+        if node in cleaned:
+            # Cut back to where the node first appeared
+            cleaned = cleaned[:cleaned.index(node) + 1]
+        else:
+            cleaned.append(node)
+    return cleaned
+
+# ----------------------------------------------------
+# 3. GENETIC ALGORITHM CORE FUNCTIONS
+# ----------------------------------------------------
+def calculate_fitness(path, graph):
+    """
+    Calculates total path cost. 
+    Fitness is inverted (1 / cost) because GA maximizes fitness.
+    """
+    if not path or path[0] != SOURCE_NODE or path[-1] != DESTINATION_NODE:
+        return 0.0001 # Invalid path penalty
+        
+    total_cost = 0
+    for i in range(len(path) - 1):
+        u, v = path[i], path[i+1]
+        if v in graph[u]:
+            total_cost += graph[u][v]
+        else:
+            return 0.0001 # Disconnected link penalty
+            
+    return 1.0 / total_cost
+
+def initialize_population(pop_size, graph, start, end):
+    """Creates an initial population of unique valid paths."""
+    population = []
+    while len(population) < pop_size:
+        path = generate_random_path(graph, start, end)
+        if path and path not in population:
+            population.append(path)
+    return population
+
+def select_parent(population, fitnesses):
+    """Selects a parent using Roulette Wheel Selection."""
+    total_fit = sum(fitnesses)
+    pick = random.uniform(0, total_fit)
+    current = 0
+    for ind, fit in zip(population, fitnesses):
+        current += fit
+        if current > pick:
+            return ind
+    return population[-1]
+
+def crossover(parent1, parent2):
+    """
+    Single-point topological crossover. Finds matching intersections 
+    between two paths and swaps the segments.
+    """
+    # Find common nodes excluding source and destination
+    common_nodes = set(parent1[1:-1]).intersection(set(parent2[1:-1]))
+    
+    if not common_nodes:
+        return parent1.copy(), parent2.copy() # No valid crossover point
+        
+    match_node = random.choice(list(common_nodes))
+    idx1 = parent1.index(match_node)
+    idx2 = parent2.index(match_node)
+    
+    child1 = clean_loops(parent1[:idx1] + parent2[idx2:])
+    child2 = clean_loops(parent2[:idx2] + parent1[idx1:])
+    
+    return child1, child2
+
+def mutate(path, graph):
+    """
+    Mutates a path by picking a random internal node and 
+    regenerating the path from that point forward.
+    """
+    if len(path) <= 2:
+        return path # Too short to mutate effectively
+        
+    mutation_idx = random.randint(0, len(path) - 2)
+    mutated_part = generate_random_path(graph, path[mutation_idx], DESTINATION_NODE)
+    
+    if mutated_part:
+        return clean_loops(path[:mutation_idx] + mutated_part)
+    return path
+
+# ----------------------------------------------------
+# 4. EXECUTION LOOP
+# ----------------------------------------------------
+def run_routing_ga(pop_size=20, generations=50, cross_prob=0.8, mut_prob=0.2):
+    population = initialize_population(pop_size, NETWORK_GRAPH, SOURCE_NODE, DESTINATION_NODE)
+    
+    print(f"Routing from Node {SOURCE_NODE} to Node {DESTINATION_NODE}...\n")
+    
+    for gen in range(generations):
+        fitnesses = [calculate_fitness(ind, NETWORK_GRAPH) for ind in population]
+        
+        # Track the generation's top solution
+        best_idx = fitnesses.index(max(fitnesses))
+        best_path = population[best_idx]
+        best_cost = 1.0 / fitnesses[best_idx]
+        
+        # Early exit if we find a target constraint or print progress
+        if gen % 10 == 0 or gen == generations - 1:
+            print(f"Gen {gen} | Best Route: {best_path} | Total Latency/Cost: {best_cost:.1f}")
+
+        # Build the next generation
+        next_population = []
+        # Elitism: keep the best individual
+        next_population.append(best_path.copy())
+        
+        while len(next_population) < pop_size:
+            p1 = select_parent(population, fitnesses)
+            p2 = select_parent(population, fitnesses)
+            
+            # Crossover
+            if random.random() < cross_prob:
+                c1, c2 = crossover(p1, p2)
+            else:
+                c1, c2 = p1.copy(), p2.copy()
+                
+            # Mutation
+            if random.random() < mut_prob:
+                c1 = mutate(c1, NETWORK_GRAPH)
+            if random.random() < mut_prob:
+                c2 = mutate(c2, NETWORK_GRAPH)
+                
+            next_population.append(c1)
+            if len(next_population) < pop_size:
+                next_population.append(c2)
+                
+        population = next_population
+
+if __name__ == "__main__":
+    run_routing_ga()
